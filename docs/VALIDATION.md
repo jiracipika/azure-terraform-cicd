@@ -76,4 +76,4 @@ confirmed every resource/block used: `azurerm_storage_account`
 | 2026-11-16T13:25Z | 43875639885 (scaffold) | failure — `fmt -check` exit 3 |
 | 2026-11-16T13:26Z | 43875792120 (scaffold) | failure — `fmt -check` exit 3 |
 | 2026-11-16T15:38Z | 43898443936 (fmt fix) | failure — exact-string unittest assertion (`default = false`) |
-| 2026-11-16 (milestone) | recorded after push | see below |
+| 2026-11-16T16:05Z | 43901119619 (milestone, commit 0676ae2) | **success — 70 tests + fmt + init + validate green on ubuntu runner / terraform 1.10.5** |
