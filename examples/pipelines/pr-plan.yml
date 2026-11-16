@@ -1,0 +1,70 @@
+# ---------------------------------------------------------------------------
+# TEMPLATE — INERT BY LOCATION: this file lives under examples/pipelines/,
+# NOT under .github/workflows/, so GitHub Actions will never execute it. It
+# documents the PR validation + plan stage of the promotion model described in
+# docs/ARCHITECTURE.md and infra/pipeline/policy.yaml. Copy into a deployed
+# workload repository and adapt before use.
+#
+# There is deliberately NO apply step anywhere in this template: pull
+# requests generate plans only; applies happen exclusively in the
+# environment-gated apply-promotion template after human approval.
+#
+# Note: fork PRs receive no OIDC tokens or secrets, so plan-dev succeeds only
+# for same-repository branches — offline checks still run for forks.
+# ---------------------------------------------------------------------------
+name: Terraform PR plan (template)
+on:
+  pull_request:
+    paths:
+      - "infra/terraform/**"
+      - "infra/pipeline/**"
+permissions:
+  contents: read
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  offline-checks:
+    name: Offline checks (fmt, validate, policy tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Static security + pipeline-policy tests
+        run: python3 -m unittest discover -s tests -v
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.10.5'
+      - run: terraform -chdir=infra/terraform fmt -check -recursive
+      - run: terraform -chdir=infra/terraform init -backend=false -input=false
+      - run: terraform -chdir=infra/terraform validate
+  plan-dev:
+    name: Plan (dev)
+    needs: offline-checks
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Azure login (plan identity, OIDC — no stored secrets)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_PLAN_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.10.5'
+      - name: Terraform init (remote state, Entra auth)
+        run: terraform -chdir=infra/terraform init -input=false -backend-config=examples/backend/dev.backend.hcl
+        env:
+          ARM_USE_AZUREAD: "true"
+          ARM_USE_OIDC: "true"
+      - name: Terraform plan (advisory preview for reviewers)
+        run: terraform -chdir=infra/terraform plan -input=false -no-color -var-file=environments/dev.tfvars -out=tfplan.dev
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-dev
+          path: infra/terraform/tfplan.dev
+          retention-days: 7

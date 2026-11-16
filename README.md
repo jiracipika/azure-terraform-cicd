@@ -3,10 +3,31 @@
 **Azure Cloud Engineering Portfolio** · [GitHub: jiracipika](https://github.com/jiracipika) · **PRIVATE repository** · **Offline scaffold / Azure NOT DEPLOYED**
 
 ## Goal
-Validate plan workflows without automatically applying paid infrastructure.
+Validate plan workflows without automatically applying paid infrastructure:
+GitHub PR validate and plan -> protected OIDC apply to dev -> human-approved
+production, with remote state in Azure Storage (blob-lease locking).
 
-## Planned Azure architecture
-Reusable Terraform modules, GitHub Actions, remote state, OIDC, branch governance.
+## Status — milestone implemented 2026-11-16 (offline validation green)
+
+- **Terraform modules** (all gated behind `deploy_enabled`, default false):
+  `state_backend` (hardened remote-state storage: Entra-only auth, versioning,
+  soft delete, per-environment containers) and `pipeline_identity`
+  (separate plan/apply OIDC identities, environment-scoped federated
+  credentials, least-privilege RBAC).
+- **Promotion model as code**: `infra/pipeline/policy.yaml` (dev -> stage ->
+  prod, manual applies only) + `tests/pipeline_policy.py`, an offline
+  simulator that replays PR / push-main / dispatch events against the REAL
+  workflows and templates.
+- **Pipeline templates (INERT)**: `examples/pipelines/` (PR plan, apply with
+  GitHub-environment approval gates, weekly read-only drift detection) and
+  `examples/backend/*.backend.hcl` azurerm backend templates — inert by
+  location, never executed by GitHub Actions.
+- **Active CI** (`.github/workflows/validate.yml`): validation-only
+  (unittest static security/policy scanners + terraform fmt/init/validate),
+  `contents: read`, pinned actions. **No automatic apply exists in this
+  repository.**
+- 70-test offline battery green; terraform fmt/init/validate green
+  (docs/VALIDATION.md has the real outputs).
 
 ## GLM / ZCode — start here
 
@@ -28,16 +49,23 @@ terraform -chdir=infra/terraform validate
 ## Source contents
 
 - `AGENTS.md`: enforceable GLM implementation contract
-- `docs/GLM_TASKS.md`: project-specific milestones
-- `docs/ARCHITECTURE.md`: intended topology and assumptions
-- `docs/SECURITY.md` / `docs/COSTS.md`: guardrails and financial control
-- `docs/VALIDATION.md`: log real evidence only
+- `docs/GLM_TASKS.md`: project-specific milestones and status
+- `docs/ARCHITECTURE.md`: promotion model, trust boundaries, DR
+- `docs/SECURITY.md` / `docs/COSTS.md`: threat-model control map and cost gate
+- `docs/VALIDATION.md`: real evidence only
 - `docs/TEARDOWN.md`: future approved cleanup plan
-- `diagrams/architecture.mmd`: initial editable Mermaid model
-- `infra/terraform/`: safe offline provider root, no billable resources declared
+- `diagrams/architecture.mmd`: promotion topology (editable Mermaid)
+- `infra/terraform/`: root foundation stack + `modules/state_backend`,
+  `modules/pipeline_identity`, `environments/{dev,stage,prod}.tfvars`
+- `infra/pipeline/policy.yaml`: environment promotion policy (data)
+- `examples/`: INERT pipeline templates, backend config templates, OIDC claims
 - `.github/workflows/validate.yml`: offline validation, no deploy step
-- `tests/`: initial safety regression tests
+- `tests/`: 70-test offline battery incl. pipeline-policy simulator
 
 ## Status and safety
 
-This is an initial engineering scaffold, **not** a deployed production system. Terraform currently defines no Azure services. The architecture modules, end-to-end tests and production readiness must be implemented and verified in subsequent GLM work. **Repository visibility must remain PRIVATE.** No credentials, secrets, real customer data, Terraform state or internal account identifiers may be committed.
+Terraform defines Azure resources only behind `deploy_enabled=false`
+(default, and in every per-environment tfvars), so `terraform plan` proposes
+zero changes. Applies exist only as inert templates under `examples/`.
+**Repository visibility must remain PRIVATE.** No credentials, secrets, real
+customer data, Terraform state or internal account identifiers may be committed.

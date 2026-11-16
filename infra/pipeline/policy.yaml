@@ -1,0 +1,51 @@
+# Environment promotion policy for the Terraform CI/CD pipeline.
+#
+# This file is DATA consumed by tests/pipeline_policy.py (the offline
+# pipeline-policy simulator). It documents — and lets tests enforce — how the
+# pipeline behaves for every GitHub event. The workflow templates in
+# examples/pipelines/ implement this policy; the simulator cross-checks that
+# they actually do (apply steps only inside environment-gated jobs, pinned
+# action versions, no auto-apply anywhere).
+schema_version: 1
+repository: jiracipika/azure-terraform-cicd
+
+active_workflows:
+  directory: .github/workflows
+  allowed_terraform_subcommands: [fmt, init, validate]
+  forbidden_terraform_subcommands: [apply, destroy, import, taint, untaint, "state", workspace]
+  required_action_pinning: "major version tag (e.g. @v4) or full commit SHA"
+
+templates:
+  directory: examples/pipelines
+  inert_because: "stored outside .github/workflows, so GitHub Actions never executes them"
+
+environments:
+  dev:
+    order: 1
+    plans_on: [pull_request]
+    apply_mode: manual
+    github_environment: dev
+  stage:
+    order: 2
+    plans_on: [push_main]
+    apply_mode: manual
+    github_environment: stage
+  prod:
+    order: 3
+    plans_on: [push_main]
+    apply_mode: manual
+    github_environment: prod
+
+promotion:
+  direction: dev -> stage -> prod
+  skip_levels_forbidden: true
+  requires_github_environment_protection: true
+  identity_secrets:
+    plan: AZURE_PLAN_CLIENT_ID
+    apply: AZURE_APPLY_CLIENT_ID
+
+drift_detection:
+  template: examples/pipelines/drift-detection.yml
+  method: "terraform plan -detailed-exitcode"
+  mutating: false
+  cadence: "weekly (Mondays 06:00 UTC)"

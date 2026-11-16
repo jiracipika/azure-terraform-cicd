@@ -1,3 +1,8 @@
+# Validation-only workflow: this job runs fmt/init/validate and the offline
+# unittest scanners, nothing else. No mutating terraform subcommand and no
+# azure CLI mutation may ever appear here (enforced by
+# tests/pipeline_policy.py against this file). Apply pipelines exist only as
+# inert templates under examples/pipelines/.
 name: Validate offline safely
 on: [push, pull_request]
 permissions:
@@ -7,7 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: python3 -m unittest discover -s tests -v
+      - name: Static security + pipeline-policy scanners (unittest)
+        run: python3 -m unittest discover -s tests -v
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: '1.10.5'

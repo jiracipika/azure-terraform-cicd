@@ -1,5 +1,32 @@
 flowchart LR
-  In[Users or engineers] --> Entry[Terraform CI/CD Pipeline]
-  Entry --> Guard[Security and governance]
-  Guard --> Workload[Managed cloud services]
-  Workload --> Logs[Evidence, observability and tests]
+  subgraph GitHub["GitHub (source control + CI/CD control plane)"]
+    Eng[Engineer opens PR] --> Val["Offline checks<br/>(fmt, validate, unittest,<br/>pipeline-policy scanners)"]
+    Val --> Plan["terraform plan (dev)<br/>advisory preview - never applies"]
+    Merge[Merge to main] --> Plan2["terraform plan (stage, prod)"]
+    Dispatch[Manual workflow_dispatch] --> Gate1{"environment: dev<br/>reviewer approval"}
+    Gate1 --> ApplyDev["terraform apply (dev)<br/>apply identity - OIDC"]
+    Gate2{"environment: stage<br/>reviewer approval"} --> ApplyStage["terraform apply (stage)"]
+    Gate3{"environment: prod<br/>reviewer approval"} --> ApplyProd["terraform apply (prod)"]
+    ApplyDev --> Gate2
+    ApplyStage --> Gate3
+    Drift["Weekly drift detection<br/>plan -detailed-exitcode<br/>read-only, opens issue"] --> Eng
+  end
+
+  subgraph Entra["Entra ID (identity plane)"]
+    OIDCPlan["id-cicd-plan<br/>federated: repo:...:environment:E"]
+    OIDCApply["id-cicd-apply<br/>federated: repo:...:environment:E"]
+  end
+
+  subgraph Azure["Azure (data plane, deploy_enabled=false offline)"]
+    State["State storage account<br/>tfstate-dev / tfstate-stage / tfstate-prod containers<br/>Entra auth only, blob-lease locking,<br/>versioning + soft delete"]
+    Foundation["rg-terraform-cicd-foundation<br/>(resource group, deploy-gated)"]
+  end
+
+  Plan --> OIDCPlan
+  Drift --> OIDCPlan
+  ApplyDev --> OIDCApply
+  ApplyStage --> OIDCApply
+  ApplyProd --> OIDCApply
+  OIDCPlan -- "Storage Blob Data Contributor" --> State
+  OIDCApply -- "Storage Blob Data Contributor<br/>+ Contributor (optional workload)" --> State
+  Foundation --- State

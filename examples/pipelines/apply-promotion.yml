@@ -1,0 +1,105 @@
+# ---------------------------------------------------------------------------
+# TEMPLATE — INERT BY LOCATION: this file lives under examples/pipelines/,
+# NOT under .github/workflows/, so GitHub Actions will never execute it. This
+# repository never runs automatic applies; this template documents what an
+# owner-approved deployment pipeline would look like (plan/apply separation
+# with manual approval gates). Copy into a deployed workload repository and
+# adapt before use.
+#
+# Approval gate mechanics: every apply job declares `environment: <name>`.
+# GitHub holds the job until a reviewer approves it through the environment's
+# protection rule (required reviewers, restricted to protected branches).
+# Each gated job re-plans and then applies that exact plan file, so what is
+# applied is precisely what was planned for the approved commit; the
+# environment reviewer sees the ref and actor on the run before approving.
+#
+# Promotion is strictly sequential: choosing endpoint "prod" applies
+# dev -> stage -> prod in order; skip-level promotion is impossible
+# (enforced offline by tests/pipeline_policy.py against this template).
+# ---------------------------------------------------------------------------
+name: Terraform apply - environment promotion (template)
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Promotion endpoint (every lower level applies first)"
+        type: choice
+        options: [dev, stage, prod]
+        required: true
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: terraform-apply-${{ inputs.environment }}
+  cancel-in-progress: false
+jobs:
+  apply-dev:
+    name: Apply (dev)
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+      - name: Azure login (apply identity, OIDC — no stored secrets)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_APPLY_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.10.5'
+      - run: terraform -chdir=infra/terraform init -input=false -backend-config=examples/backend/dev.backend.hcl
+        env:
+          ARM_USE_AZUREAD: "true"
+          ARM_USE_OIDC: "true"
+      - run: terraform -chdir=infra/terraform plan -input=false -no-color -var-file=environments/dev.tfvars -out=tfplan.dev
+      - name: Terraform apply (runs only after environment approval)
+        run: terraform -chdir=infra/terraform apply -input=false -auto-approve tfplan.dev
+  apply-stage:
+    name: Apply (stage)
+    needs: apply-dev
+    if: inputs.environment == 'stage' || inputs.environment == 'prod'
+    runs-on: ubuntu-latest
+    environment: stage
+    steps:
+      - uses: actions/checkout@v4
+      - name: Azure login (apply identity, OIDC — no stored secrets)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_APPLY_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.10.5'
+      - run: terraform -chdir=infra/terraform init -input=false -backend-config=examples/backend/stage.backend.hcl
+        env:
+          ARM_USE_AZUREAD: "true"
+          ARM_USE_OIDC: "true"
+      - run: terraform -chdir=infra/terraform plan -input=false -no-color -var-file=environments/stage.tfvars -out=tfplan.stage
+      - name: Terraform apply (runs only after environment approval)
+        run: terraform -chdir=infra/terraform apply -input=false -auto-approve tfplan.stage
+  apply-prod:
+    name: Apply (prod)
+    needs: apply-stage
+    if: inputs.environment == 'prod'
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+      - name: Azure login (apply identity, OIDC — no stored secrets)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_APPLY_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.10.5'
+      - run: terraform -chdir=infra/terraform init -input=false -backend-config=examples/backend/prod.backend.hcl
+        env:
+          ARM_USE_AZUREAD: "true"
+          ARM_USE_OIDC: "true"
+      - run: terraform -chdir=infra/terraform plan -input=false -no-color -var-file=environments/prod.tfvars -out=tfplan.prod
+      - name: Terraform apply (runs only after environment approval)
+        run: terraform -chdir=infra/terraform apply -input=false -auto-approve tfplan.prod

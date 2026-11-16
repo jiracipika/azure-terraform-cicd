@@ -1,0 +1,72 @@
+# ---------------------------------------------------------------------------
+# TEMPLATE — INERT BY LOCATION: this file lives under examples/pipelines/,
+# NOT under .github/workflows/, so GitHub Actions will never execute it. It
+# documents the scheduled drift-detection design from docs/ARCHITECTURE.md.
+# Copy into a deployed workload repository and adapt before use.
+#
+# Drift detection is strictly READ-ONLY: `terraform plan -detailed-exitcode`
+# never writes state or resources (exit 0 = no drift, 2 = drift detected,
+# 1 = error). On drift it opens an issue for human triage. There is no apply
+# path in this template, by design.
+# ---------------------------------------------------------------------------
+name: Terraform drift detection (template)
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch: {}
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+jobs:
+  detect-drift:
+    name: Drift check (${{ matrix.env }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [dev, stage, prod]
+    environment: ${{ matrix.env }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Azure login (plan identity, read-only, OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_PLAN_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.10.5'
+      - name: Terraform init (remote state, Entra auth)
+        run: terraform -chdir=infra/terraform init -input=false -backend-config=examples/backend/${{ matrix.env }}.backend.hcl
+        env:
+          ARM_USE_AZUREAD: "true"
+          ARM_USE_OIDC: "true"
+      - name: Terraform plan (read-only, detailed exit code)
+        id: plan
+        run: |
+          set +e
+          terraform -chdir=infra/terraform plan -input=false -no-color -detailed-exitcode -var-file=environments/${{ matrix.env }}.tfvars
+          code=$?
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" -eq 1 ]; then exit 1; fi
+          exit 0
+      - name: Open drift issue
+        if: steps.plan.outputs.exitcode == '2'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Terraform drift detected (${{ matrix.env }})`,
+              labels: ['drift', '${{ matrix.env }}'],
+              body: [
+                'Scheduled drift detection found differences between configuration and real infrastructure.',
+                '',
+                `- Environment: ${{ matrix.env }}`,
+                `- Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+                '- Triage manually: compare the plan log, then reconcile with a reviewed change — never auto-apply.'
+              ].join('\n')
+            });
