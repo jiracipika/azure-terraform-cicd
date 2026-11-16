@@ -1,6 +1,6 @@
 # 08 — Terraform CI/CD Pipeline
 
-**Azure Cloud Engineering Portfolio** · [GitHub: jiracipika](https://github.com/jiracipika) · **PRIVATE repository** · **Offline scaffold / Azure NOT DEPLOYED**
+**Azure Cloud Engineering Portfolio** · [GitHub: jiracipika](https://github.com/jiracipika) · **PUBLIC repository** · **Offline scaffold / Azure NOT DEPLOYED**
 
 ## Goal
 Validate plan workflows without automatically applying paid infrastructure:
